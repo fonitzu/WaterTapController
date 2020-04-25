@@ -62,8 +62,41 @@ typedef enum
 	TEMPERATURE_CHILD_ID,
 } MySensorsChildId;
 
+// Corresponding enum for V_STATUS ( 0 = Off, 1 = On )
+typedef enum WaterTapState_t
+{
+	// Water tap state "OFF".
+	Off,
+	// Water tap state "ON".
+	On
+} WaterTapState;
+
+// Water tap's state (On/Off).
+WaterTapState CurrentState;
+
+// Valve motor state.
+typedef enum MotorState_t
+{
+	// The motor is off
+	MotorOff,
+	// The motor opens the valve.
+	MotorOpen,
+	// The motor closes the valve.
+	MotorClose,
+} MotorState;
+
+// The time needed to turn the valve on or off (milliseconds).
+#define ON_OFF_VALVE_TRIP_TIME		1000
+
 #define SKETCH_NAME		"Water Tap"
 #define SKETCH_VERSION	"0.1"
+
+
+// Maximum time we wait for the controller to send sprinkler's state (milliseconds).
+#define CONTROLLER_WAIT_TIME	3000
+
+// Wake-up interval (milliseconds)
+#define WAKE_UP_INTERVAL	(10 * 1000/*second*/)
 
 // Shortly blink with the blue LED to signal "initialization done".
 // This LED will always blink after reset, no matter if MY_DEBUG is
@@ -117,12 +150,130 @@ void presentation( void )
 	present( TEMPERATURE_CHILD_ID, S_TEMP );
 }
 
+
 void setup()
 {
-  // put your setup code here, to run once:
+	// put your setup code here, to run once:
 }
 
+// Main application loop:
+// - Request the water tap on/off state from controller with timeout,
+// - Verify and update the battery level,
+// - Sleep
 void loop()
 {
-  // put your main code here, to run repeatedly:
+	digitalWrite( ACTIVE_LED, LED_ON );
+	request( WATER_TAP_CHILD_ID, V_STATUS );
+	wait( CONTROLLER_WAIT_TIME, C_REQ, V_STATUS );
+	// batteryLevel();
+	digitalWrite( ACTIVE_LED, LED_OFF );
+	smartSleep( WAKE_UP_INTERVAL ); 
 }
+
+// Turns the motor off or on (open or close the valve)
+void motorControl( MotorState state )
+{
+	switch( state )
+	{
+		case MotorOpen:
+		{
+			digitalWrite( VALVE_CLOSE_PIN, MOTOR_OFF );
+			digitalWrite( VALVE_OPEN_PIN, MOTOR_ON );
+			return;
+		}
+		case MotorClose:
+		{
+			digitalWrite( VALVE_OPEN_PIN, MOTOR_OFF );
+			digitalWrite( VALVE_CLOSE_PIN, MOTOR_ON );
+			return;
+		}
+		
+		// Off is a safe state.
+		// If both VALVE_CLOSE_PIN and VALVE_OPEN_PIN are active,
+		// a short circuit will occur between VDD and GND.
+
+		// case Off:
+		default:
+		{
+			digitalWrite( VALVE_CLOSE_PIN, MOTOR_OFF );
+			digitalWrite( VALVE_OPEN_PIN, MOTOR_OFF );
+			return;
+		}
+	}
+}
+
+// Wait for motor operation (open or close the valve).
+void waitForMotor( void )
+{
+	wait( ON_OFF_VALVE_TRIP_TIME );
+}
+
+// Turn the water on.
+void OpenWaterTap( void )
+{
+	CurrentState = On;
+	motorControl( MotorOpen );
+	waitForMotor();
+	motorControl( MotorOff );
+	digitalWrite( STATE_LED, LED_ON );
+}
+
+// Turn the water off.
+void CloseWaterTap( void )
+{
+	// safety: avoid both pins high because this will short the battery
+	motorControl( MotorClose );
+	waitForMotor();
+	motorControl( MotorOff );
+	CurrentState = WaterTapState::Off;
+	digitalWrite( STATE_LED, LED_OFF );
+}
+
+
+// Process a Status message from controller.
+void receiveStatus( const MyMessage &message )
+{
+	if( message.getSensor() != WATER_TAP_CHILD_ID )
+	{
+		Serial.print( "Received V_STATUS message for unknown child " );
+		Serial.println( message.getSensor() );
+		return;
+	}
+
+	// Change only when a new value was received
+	if( message.getInt() == CurrentState )
+	{
+		return;
+	}
+	
+	if( message.getInt() == Off )
+	{
+		CloseWaterTap();
+		return;
+	}
+
+	if( message.getInt() == On )
+	{
+		OpenWaterTap();
+		return;
+	}
+
+	// Unknown value
+	Serial.print( "Unknown sprinkler state received (0=OFF, 1=ON): " );
+	Serial.println( message.getInt() );
+}
+
+// Process a message received from the controller.
+void receive( const MyMessage &message )
+{
+	switch( message.getType() )
+	{
+		case V_STATUS:	{ receiveStatus( message ); return; }
+		default:
+		{
+			Serial.println( "Unknown message received:" );
+			Serial.println( message.getType() );
+		}
+	}
+}
+
