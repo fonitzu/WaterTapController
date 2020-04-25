@@ -53,6 +53,17 @@
 // GPIO used to turn the water tap off.
 #define VALVE_CLOSE_PIN	15
 
+// Child IDs for MySensors library.
+typedef enum
+{
+	// (0) MySensors child ID for the water tap switch.
+	WATER_TAP_CHILD_ID = 0,
+	// (1) MySensors child ID for the temperature sensor.
+	TEMPERATURE_CHILD_ID,
+} MySensorsChildId;
+
+#define SKETCH_NAME		"Water Tap"
+#define SKETCH_VERSION	"0.1"
 
 // Shortly blink with the blue LED to signal "initialization done".
 // This LED will always blink after reset, no matter if MY_DEBUG is
@@ -94,6 +105,17 @@ void before( void )
 	blink();
 }
 
+
+// Present child nodes to the controller.
+// Required by MySensors library.
+void presentation( void )
+{
+	// Send the sketch version information to the gateway and Controller
+	sendSketchInfo( SKETCH_NAME, SKETCH_VERSION );
+
+	present( WATER_TAP_CHILD_ID, S_BINARY );
+	present( TEMPERATURE_CHILD_ID, S_TEMP );
+}
 
 void setup()
 {
