@@ -104,6 +104,11 @@ typedef enum MotorState_t
 // Wake-up interval (milliseconds)
 #define WAKE_UP_INTERVAL	(10 * 1000/*second*/)
 
+// Minimal battery voltage, under 2.5V the valve motor will not opeate.
+#define MIN_BATTERY_VOLTAGE		(2.5)
+// Expected battery voltage for two new AAA batteries.
+#define MAX_BATTERY_VOLTAGE		(3.0)
+
 // Multimeter message reporting the battery voltage.
 MyMessage voltageMsg( MULTIMETER_CHILD_ID, V_VOLTAGE );
 
@@ -208,11 +213,26 @@ uint32_t supplyVoltage( void )
 }
 
 // Report the battery level to controller.
-// The battery level is sent as real battery voltage.
+// The battery level is sent as both real battery voltage and percent.
 void batteryLevel( void )
 {
-	voltageMsg.set( supplyVoltage() / 1000.0, 3);
+	float battery_voltage = supplyVoltage() / 1000.0;
+	voltageMsg.set( battery_voltage, 3);
 	send( voltageMsg );
+	
+	// Linear mapping of battery voltage range 3.0V...2.5V
+	// to battery level 100%...0%.
+	// At least Eneloop AAA batteries have a flat voltage
+	// during discharging, so the battery level will not
+	// reflect the real remaining run time in this case.
+	float battery_level = 
+	( battery_voltage - MIN_BATTERY_VOLTAGE ) /
+	//---------------------------------------
+	( MAX_BATTERY_VOLTAGE - MIN_BATTERY_VOLTAGE );
+	battery_level *= 100.0;
+	battery_level = ( battery_level < 0 ) ? 0 : battery_level;
+	battery_level = ( battery_level > 100 ) ? 100 : battery_level;
+	sendBatteryLevel( battery_level );
 }
 
 // Main application loop:
