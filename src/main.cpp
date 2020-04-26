@@ -4,12 +4,14 @@
 // Enable debug prints to serial monitor
 #define MY_DEBUG
 
-
 // Enable and select radio type attached
 //#define MY_RADIO_RF24
 #define MY_RADIO_NRF5_ESB
 //#define MY_RADIO_RFM69
 //#define MY_RADIO_RFM95
+
+// nRF52840 can send with +8 dBm
+#define MY_NRF5_ESB_PA_LEVEL	(8)
 
 // Enable repeater functionality for this node
 //#define MY_REPEATER_FEATURE
