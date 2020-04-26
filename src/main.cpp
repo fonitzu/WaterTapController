@@ -63,6 +63,9 @@ typedef enum
 	WATER_TAP_CHILD_ID = 0,
 	// (1) MySensors child ID for the temperature sensor.
 	TEMPERATURE_CHILD_ID,
+	// (2) MySensors child ID for the multimeter.
+	// The multimeter is used to report the battery voltage to controller.
+	MULTIMETER_CHILD_ID,
 } MySensorsChildId;
 
 // Corresponding enum for V_STATUS ( 0 = Off, 1 = On )
@@ -92,7 +95,7 @@ typedef enum MotorState_t
 #define ON_OFF_VALVE_TRIP_TIME		1000
 
 #define SKETCH_NAME		"Water Tap"
-#define SKETCH_VERSION	"0.1"
+#define SKETCH_VERSION	"0.2"
 
 
 // Maximum time we wait for the controller to send sprinkler's state (milliseconds).
@@ -100,6 +103,9 @@ typedef enum MotorState_t
 
 // Wake-up interval (milliseconds)
 #define WAKE_UP_INTERVAL	(10 * 1000/*second*/)
+
+// Multimeter message reporting the battery voltage.
+MyMessage voltageMsg( MULTIMETER_CHILD_ID, V_VOLTAGE );
 
 // Shortly blink with the blue LED to signal "initialization done".
 // This LED will always blink after reset, no matter if MY_DEBUG is
@@ -151,12 +157,62 @@ void presentation( void )
 
 	present( WATER_TAP_CHILD_ID, S_BINARY );
 	present( TEMPERATURE_CHILD_ID, S_TEMP );
+	present( MULTIMETER_CHILD_ID, S_MULTIMETER );
 }
 
 
 void setup()
 {
 	// put your setup code here, to run once:
+}
+
+// Return the supply voltage level in millivolt.
+uint32_t supplyVoltage( void )
+{
+	// NRF52:
+	// Sampling time 3uS@700uA
+	int32_t sample;
+	NRF_SAADC->ENABLE = SAADC_ENABLE_ENABLE_Enabled << SAADC_ENABLE_ENABLE_Pos;
+	NRF_SAADC->RESOLUTION = SAADC_RESOLUTION_VAL_12bit << SAADC_RESOLUTION_VAL_Pos;
+	NRF_SAADC->CH[0].PSELP = SAADC_CH_PSELP_PSELP_VDD << SAADC_CH_PSELP_PSELP_Pos;
+	NRF_SAADC->CH[0].CONFIG = (SAADC_CH_CONFIG_BURST_Disabled << SAADC_CH_CONFIG_BURST_Pos) |
+	                          (SAADC_CH_CONFIG_MODE_SE << SAADC_CH_CONFIG_MODE_Pos) |
+	                          (SAADC_CH_CONFIG_TACQ_3us << SAADC_CH_CONFIG_TACQ_Pos) |
+	                          (SAADC_CH_CONFIG_REFSEL_Internal << SAADC_CH_CONFIG_REFSEL_Pos) |
+	                          (SAADC_CH_CONFIG_GAIN_Gain1_6 << SAADC_CH_CONFIG_GAIN_Pos) |
+	                          (SAADC_CH_CONFIG_RESN_Bypass << SAADC_CH_CONFIG_RESN_Pos) |
+	                          (SAADC_CH_CONFIG_RESP_Bypass << SAADC_CH_CONFIG_RESP_Pos);
+	NRF_SAADC->OVERSAMPLE = SAADC_OVERSAMPLE_OVERSAMPLE_Bypass << SAADC_OVERSAMPLE_OVERSAMPLE_Pos;
+	NRF_SAADC->SAMPLERATE = SAADC_SAMPLERATE_MODE_Task << SAADC_SAMPLERATE_MODE_Pos;
+	NRF_SAADC->RESULT.MAXCNT = 1;
+	NRF_SAADC->RESULT.PTR = (uint32_t)&sample;
+
+	NRF_SAADC->EVENTS_STARTED = 0;
+	NRF_SAADC->TASKS_START = 1;
+	while (!NRF_SAADC->EVENTS_STARTED);
+	NRF_SAADC->EVENTS_STARTED = 0;
+
+	NRF_SAADC->EVENTS_END = 0;
+	NRF_SAADC->TASKS_SAMPLE = 1;
+	while (!NRF_SAADC->EVENTS_END);
+	NRF_SAADC->EVENTS_END = 0;
+
+	NRF_SAADC->EVENTS_STOPPED = 0;
+	NRF_SAADC->TASKS_STOP = 1;
+	while (!NRF_SAADC->EVENTS_STOPPED);
+	NRF_SAADC->EVENTS_STOPPED = 1;
+
+	NRF_SAADC->ENABLE = (SAADC_ENABLE_ENABLE_Disabled << SAADC_ENABLE_ENABLE_Pos);
+
+	return (sample*3600)/4096;
+}
+
+// Report the battery level to controller.
+// The battery level is sent as real battery voltage.
+void batteryLevel( void )
+{
+	voltageMsg.set( supplyVoltage() / 1000.0, 3);
+	send( voltageMsg );
 }
 
 // Main application loop:
@@ -168,7 +224,7 @@ void loop()
 	digitalWrite( ACTIVE_LED, LED_ON );
 	request( WATER_TAP_CHILD_ID, V_STATUS );
 	wait( CONTROLLER_WAIT_TIME, C_REQ, V_STATUS );
-	// batteryLevel();
+	batteryLevel();
 	digitalWrite( ACTIVE_LED, LED_OFF );
 	smartSleep( WAKE_UP_INTERVAL ); 
 }
